@@ -1,0 +1,71 @@
+name: MySQL SSR and ISR k6 Performance Test
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: testdb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -prootpass"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: rootpass
+      DB_NAME: testdb
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install
+      - name: Seed MySQL database
+        run: node scripts/seed-db.js
+      - name: Build production Next.js
+        run: npm run build
+      - name: Start production server
+        run: |
+          npm start > /tmp/nextjs.log 2>&1 &
+          echo $! > /tmp/nextjs.pid
+          for i in $(seq 1 45); do
+            if curl -fsS http://localhost:3000/isr >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:3000/isr >/dev/null
+      - name: Verify SSR database value and ISR page
+        run: |
+          curl -fsS http://localhost:3000/server-side | grep -q 'CI-MySQL-Verified'
+          curl -fsS http://localhost:3000/isr | grep -q 'Incremental Static Regeneration'
+      - name: Benchmark SSR with k6
+        run: |
+          mkdir -p benchmark-results
+          docker run --rm --network host -v "$PWD:/work" -w /work -e TEST_PATH=/server-side grafana/k6:latest run --summary-export=benchmark-results/ssr-summary.json tests/load-test.js | tee benchmark-results/ssr-console.txt
+      - name: Benchmark ISR with k6
+        run: |
+          docker run --rm --network host -v "$PWD:/work" -w /work -e TEST_PATH=/isr grafana/k6:latest run --summary-export=benchmark-results/isr-summary.json tests/load-test.js | tee benchmark-results/isr-console.txt
+      - name: Summarize measured results
+        run: node scripts/compare-results.js
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-ssr-isr-k6-results
+          path: |
+            benchmark-results/
+          if-no-files-found: warn
+      - name: Show server logs on failure
+        if: failure()
+        run: cat /tmp/nextjs.log || true
