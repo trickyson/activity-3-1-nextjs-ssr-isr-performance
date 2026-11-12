@@ -52,10 +52,10 @@ jobs:
       - name: Benchmark SSR with k6
         run: |
           mkdir -p benchmark-results
-          docker run --rm --network host -v "$PWD:/work" -w /work -e TEST_PATH=/server-side grafana/k6:latest run --summary-export=benchmark-results/ssr-summary.json tests/load-test.js | tee benchmark-results/ssr-console.txt
+          docker run --rm --user "$(id -u):$(id -g)" --network host -v "$PWD:/work" -w /work -e TEST_PATH=/server-side grafana/k6:latest run --summary-export=benchmark-results/ssr-summary.json tests/load-test.js | tee benchmark-results/ssr-console.txt
       - name: Benchmark ISR with k6
         run: |
-          docker run --rm --network host -v "$PWD:/work" -w /work -e TEST_PATH=/isr grafana/k6:latest run --summary-export=benchmark-results/isr-summary.json tests/load-test.js | tee benchmark-results/isr-console.txt
+          docker run --rm --user "$(id -u):$(id -g)" --network host -v "$PWD:/work" -w /work -e TEST_PATH=/isr grafana/k6:latest run --summary-export=benchmark-results/isr-summary.json tests/load-test.js | tee benchmark-results/isr-console.txt
       - name: Summarize measured results
         run: node scripts/compare-results.js
       - name: Upload benchmark evidence
